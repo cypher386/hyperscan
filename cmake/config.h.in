@@ -1,5 +1,8 @@
 /* used by cmake */
 
+#ifndef CONFIG_H_
+#define CONFIG_H_
+
 /* "Define if the build is 32 bit" */
 #cmakedefine ARCH_32_BIT
 
@@ -17,6 +20,9 @@
 
 /* Define if building "fat" runtime. */
 #cmakedefine FAT_RUNTIME
+
+/* Define if building AVX-512 in the fat runtime. */
+#cmakedefine BUILD_AVX512
 
 /* Define to 1 if `backtrace' works. */
 #cmakedefine HAVE_BACKTRACE
@@ -42,6 +48,8 @@
 /* Define to 1 if you have the declaration of `pthread_setaffinity_np', and to
    0 if you don't. */
 #cmakedefine HAVE_DECL_PTHREAD_SETAFFINITY_NP
+
+#cmakedefine HAVE_PTHREAD_NP_H
 
 /* Define to 1 if you have the `malloc_info' function. */
 #cmakedefine HAVE_MALLOC_INFO
@@ -76,6 +84,9 @@
 /* Define to 1 if you have the `_aligned_malloc' function. */
 #cmakedefine HAVE__ALIGNED_MALLOC
 
+/* Define if compiler has __builtin_constant_p */
+#cmakedefine HAVE__BUILTIN_CONSTANT_P
+
 /* Optimize, inline critical functions */
 #cmakedefine HS_OPTIMIZE
 
@@ -91,3 +102,5 @@
 
 /* define if reverse_graph requires patch for boost 1.62.0 */
 #cmakedefine BOOST_REVGRAPH_PATCH
+
+#endif /* CONFIG_H_ */
