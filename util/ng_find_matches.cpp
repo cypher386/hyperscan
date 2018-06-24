@@ -41,6 +41,7 @@
 #include "util/compare.h"
 #include "util/report.h"
 #include "util/report_manager.h"
+#include "util/unordered.h"
 
 #include <algorithm>
 
@@ -138,8 +139,9 @@ gatherPredecessorsByDepth(const NGHolder &g, NFAVertex src, u32 depth) {
 
 // this is a per-vertex, per-shadow level state transition table
 struct GraphCache {
-    GraphCache(u32 dist_in, const NGHolder &g) :
-        size(num_vertices(g)), edit_distance(dist_in)
+    GraphCache(u32 dist_in, u32 hamm_in, const NGHolder &g)
+        : hamming(hamm_in > 0), size(num_vertices(g)),
+          edit_distance(hamming ? hamm_in : dist_in)
     {
         auto dist_max = edit_distance + 1;
 
@@ -219,7 +221,7 @@ struct GraphCache {
                 auto cur_v_bit = i;
 
                 // enable transition to next level helper (this handles insertion)
-                if (d < edit_distance && !is_any_accept(cur_v, g)) {
+                if (!hamming && d < edit_distance && !is_any_accept(cur_v, g)) {
                     auto &next_v_helpers = helper_transitions[i][d + 1];
 
                     next_v_helpers.set(cur_v_bit);
@@ -229,6 +231,10 @@ struct GraphCache {
                 // but only if we're at shadow level 0
                 if (edge(cur_v, cur_v, g).second && d == 0) {
                     v_shadows.set(cur_v_bit);
+                }
+
+                if (hamming && d > 0) {
+                    continue;
                 }
 
                 // populate state transition tables
@@ -294,7 +300,8 @@ struct GraphCache {
                 // add self to report list at all levels
                 vertex_reports_by_level[d][v].insert(rs.begin(), rs.end());
             }
-            if (edit_distance == 0) {
+
+            if (edit_distance == 0 || hamming) {
                 // if edit distance is 0, no predecessors will have reports
                 continue;
             }
@@ -322,7 +329,7 @@ struct GraphCache {
                 // add self to report list at all levels
                 vertex_eod_reports_by_level[d][v].insert(rs.begin(), rs.end());
             }
-            if (edit_distance == 0) {
+            if (edit_distance == 0 || hamming) {
                 // if edit distance is 0, no predecessors will have reports
                 continue;
             }
@@ -478,6 +485,7 @@ struct GraphCache {
     vector<map<NFAVertex, flat_set<ReportID>>> vertex_reports_by_level;
     vector<map<NFAVertex, flat_set<ReportID>>> vertex_eod_reports_by_level;
 
+    bool hamming;
     u32 size;
     u32 edit_distance;
 };
@@ -681,6 +689,7 @@ struct StateSet {
                 result.emplace_back(id, dist, shadows_som[dist][id],
                                     State::NODE_SHADOW);
             }
+
             auto cur_helper_vertices = helpers[dist];
             cur_helper_vertices &= gc.getAcceptTransitions(dist);
             for (size_t id = cur_helper_vertices.find_first();
@@ -707,6 +716,7 @@ struct StateSet {
                 result.emplace_back(id, dist, shadows_som[dist][id],
                                     State::NODE_SHADOW);
             }
+
             auto cur_helper_vertices = helpers[dist];
             cur_helper_vertices &= gc.getAcceptEodTransitions(dist);
             for (size_t id = cur_helper_vertices.find_first();
@@ -752,12 +762,34 @@ bool operator==(const StateSet::State &a, const StateSet::State &b) {
            a.som == b.som;
 }
 
+/** \brief Cache to speed up edge lookups, rather than hitting the graph. */
+struct EdgeCache {
+    explicit EdgeCache(const NGHolder &g) {
+        cache.reserve(num_vertices(g));
+        for (auto e : edges_range(g)) {
+            cache.emplace(make_pair(source(e, g), target(e, g)), e);
+        }
+    }
+
+    NFAEdge get(NFAVertex u, NFAVertex v) const {
+        auto it = cache.find(make_pair(u, v));
+        if (it != cache.end()) {
+            return it->second;
+        }
+        return NFAEdge();
+    }
+
+private:
+    ue2_unordered_map<pair<NFAVertex, NFAVertex>, NFAEdge> cache;
+};
+
 struct fmstate {
     const size_t num_states; // number of vertices in graph
     StateSet states; // currently active states
     StateSet next; // states on after this iteration
     GraphCache &gc;
     vector<NFAVertex> vertices; // mapping from index to vertex
+    EdgeCache edge_cache;
     size_t offset = 0;
     unsigned char cur = 0;
     unsigned char prev = 0;
@@ -771,7 +803,7 @@ struct fmstate {
           states(num_states, edit_distance),
           next(num_states, edit_distance),
           gc(gc_in), vertices(num_vertices(g), NGHolder::null_vertex()),
-          utf8(utf8_in), allowStartDs(aSD_in), rm(rm_in) {
+          edge_cache(g), utf8(utf8_in), allowStartDs(aSD_in), rm(rm_in) {
         // init states
         states.activateState(
                     StateSet::State {g[g.start].index, 0, 0,
@@ -889,7 +921,7 @@ void getAcceptMatches(const NGHolder &g, MatchSet &matches,
             eod ? state.gc.vertex_eod_reports_by_level[cur.level][u]
                 : state.gc.vertex_reports_by_level[cur.level][u];
 
-        NFAEdge e = edge(u, accept_vertex, g);
+        NFAEdge e = state.edge_cache.get(u, accept_vertex);
 
         // we assume edge assertions only exist at level 0
         if (e && !canReach(g, e, state)) {
@@ -965,7 +997,7 @@ void step(const NGHolder &g, fmstate &state, StateSet::WorkingData &wd) {
             } else {
                 // we assume edge assertions only exist on level 0
                 const CharReach &cr = g[v].char_reach;
-                NFAEdge e = edge(u, v, g);
+                NFAEdge e = state.edge_cache.get(u, v);
 
                 if (cr.test(state.cur) &&
                     (!e || canReach(g, e, state))) {
@@ -1053,27 +1085,33 @@ void filterMatches(MatchSet &matches) {
  */
 bool findMatches(const NGHolder &g, const ReportManager &rm,
                  const string &input, MatchSet &matches,
-                 const u32 edit_distance, const bool notEod, const bool utf8) {
+                 const u32 edit_distance, const u32 hamm_distance,
+                 const bool notEod, const bool utf8) {
     assert(hasCorrectlyNumberedVertices(g));
     // cannot match fuzzy utf8 patterns, this should've been filtered out at
     // compile time, so make it an assert
     assert(!edit_distance || !utf8);
+    // cannot be both edit and Hamming distance at once
+    assert(!edit_distance || !hamm_distance);
 
-    const size_t total_states = num_vertices(g) * (3 * edit_distance + 1);
+    bool hamming = hamm_distance > 0;
+    auto dist = hamming ? hamm_distance : edit_distance;
+
+    const size_t total_states = num_vertices(g) * (3 * dist + 1);
     DEBUG_PRINTF("Finding matches (%zu total states)\n", total_states);
     if (total_states > STATE_COUNT_MAX) {
         DEBUG_PRINTF("too big\n");
         return false;
     }
 
-    GraphCache gc(edit_distance, g);
+    GraphCache gc(edit_distance, hamm_distance, g);
 #ifdef DEBUG
     gc.dumpStateTransitionTable(g);
 #endif
 
     const bool allowStartDs = (proper_out_degree(g.startDs, g) > 0);
 
-    struct fmstate state(g, gc, utf8, allowStartDs, edit_distance, rm);
+    struct fmstate state(g, gc, utf8, allowStartDs, dist, rm);
 
     StateSet::WorkingData wd;
 
@@ -1081,7 +1119,7 @@ bool findMatches(const NGHolder &g, const ReportManager &rm,
 #ifdef DEBUG
         state.states.dumpActiveStates();
 #endif
-        state.offset = distance(input.begin(), it);
+        state.offset = std::distance(input.begin(), it);
         state.cur = *it;
 
         step(g, state, wd);

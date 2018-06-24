@@ -143,7 +143,7 @@ hs_error_t HS_CDECL hs_deserialize_database(const char *bytes,
  * by @ref hs_serialize_database() at a given memory location.
  *
  * This function (unlike @ref hs_deserialize_database()) will write the
- * reconstructed database to the memory location given in the @a db parameter.
+ * reconstructed database to the memory location given in the @p db parameter.
  * The amount of space required at this location can be determined with the
  * @ref hs_serialized_database_size() function.
  *
@@ -479,6 +479,10 @@ hs_error_t HS_CDECL hs_valid_platform(void);
 
 /**
  * A parameter passed to this function was invalid.
+ *
+ * This error is only returned in cases where the function can detect an
+ * invalid parameter -- it cannot be relied upon to detect (for example)
+ * pointers to freed memory or other invalid data.
  */
 #define HS_INVALID              (-1)
 
@@ -560,6 +564,18 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * (SSSE3).
  */
 #define HS_ARCH_ERROR           (-11)
+
+/**
+ * Provided buffer was too small.
+ *
+ * This error indicates that there was insufficient space in the buffer. The
+ * call should be repeated with a larger provided buffer.
+ *
+ * Note: in this situation, it is normal for the amount of space required to be
+ * returned in the same manner as the used space would have been returned if the
+ * call was successful.
+ */
+#define HS_INSUFFICIENT_SPACE   (-12)
 
 /** @} */
 

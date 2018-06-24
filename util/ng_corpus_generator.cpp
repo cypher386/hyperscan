@@ -42,7 +42,6 @@
 #include "util/container.h"
 #include "util/graph_range.h"
 #include "util/make_unique.h"
-#include "util/ue2_containers.h"
 #include "util/ue2string.h"
 #include "util/unicode_def.h"
 #include "util/unicode_set.h"
@@ -52,6 +51,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 #include <boost/utility.hpp>
@@ -143,7 +143,7 @@ void findPaths(const NGHolder &g, CorpusProperties &cProps,
     vector<unique_ptr<VertexPath>> open;
     open.push_back(ue2::make_unique<VertexPath>(1, g.start));
 
-    ue2::unordered_set<NFAVertex> one_way_in;
+    unordered_set<NFAVertex> one_way_in;
     for (const auto &v : vertices_range(g)) {
         if (in_degree(v, g) <= 1) {
             one_way_in.insert(v);
@@ -255,16 +255,34 @@ CorpusGeneratorImpl::CorpusGeneratorImpl(const NGHolder &graph_in,
                                          CorpusProperties &props)
     : expr(expr_in), graph(graph_in), cProps(props) {
     // if this pattern is to be matched approximately
-    if (expr.edit_distance && !props.editDistance) {
-        props.editDistance = props.rand(0, expr.edit_distance + 1);
+    if ((expr.edit_distance || expr.hamm_distance) && !props.editDistance) {
+        props.editDistance =
+            props.rand(0, expr.hamm_distance + expr.edit_distance + 1);
     }
 }
 
 void CorpusGeneratorImpl::generateCorpus(vector<string> &data) {
     newGenerator(data);
 
-    // If the caller has asked us, apply edit distance to corpora
-    if (cProps.editDistance) {
+    if (cProps.editDistance && !data.empty() &&
+        data.size() < cProps.corpusLimit) {
+        // Create more entries by copying the corpora and applying edits
+        size_t diff = cProps.corpusLimit - data.size();
+        size_t repeats = diff / data.size();
+        size_t remains = diff % data.size();
+        vector<string> newdata;
+        for (size_t i = 0; i < repeats; i++) {
+            std::copy(data.begin(), data.end(), std::back_inserter(newdata));
+        }
+        if (remains) {
+            std::copy_n(data.begin(), remains, std::back_inserter(newdata));
+        }
+        for (auto &s : newdata) {
+            editCorpus(&s, cProps);
+        }
+        std::move(newdata.begin(), newdata.end(), back_inserter(data));
+    } else if (cProps.editDistance) {
+        // If the caller has asked us, apply edit distance to corpora
         for (auto &s : data) {
             editCorpus(&s, cProps);
         }

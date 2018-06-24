@@ -30,7 +30,7 @@
 #include "hs_common.h"
 #include "hs_runtime.h"
 #include "ue2common.h"
-#include "util/cpuid_flags.h"
+#include "util/cpuid_inline.h"
 #include "util/join.h"
 
 #if defined(DISABLE_AVX512_DISPATCH)
@@ -126,6 +126,16 @@ CREATE_DISPATCH(hs_error_t, hs_serialized_database_info, const char *bytes,
 
 CREATE_DISPATCH(hs_error_t, hs_serialized_database_size, const char *bytes,
                 const size_t length, size_t *deserialized_size);
+
+CREATE_DISPATCH(hs_error_t, hs_compress_stream, const hs_stream_t *stream,
+                char *buf, size_t buf_space, size_t *used_space);
+
+CREATE_DISPATCH(hs_error_t, hs_expand_stream, const hs_database_t *db,
+                hs_stream_t **stream, const char *buf,size_t buf_size);
+
+CREATE_DISPATCH(hs_error_t, hs_reset_and_expand_stream, hs_stream_t *to_stream,
+                const char *buf, size_t buf_size, hs_scratch_t *scratch,
+                match_event_handler onEvent, void *context);
 
 /** INTERNALS **/
 

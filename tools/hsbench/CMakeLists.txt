@@ -4,12 +4,7 @@ if (NOT SQLITE3_FOUND)
     return()
 endif()
 
-if (NOT XCODE)
-    include_directories(SYSTEM ${SQLITE3_INCLUDE_DIRS})
-else()
-    # cmake doesn't think Xcode supports isystem
-    set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -isystem ${SQLITE3_INCLUDE_DIRS}")
-endif()
+include_directories(SYSTEM ${SQLITE3_INCLUDE_DIRS})
 
 # BSD has the _np funcs in a _np header
 CHECK_INCLUDE_FILE_CXX(pthread_np.h HAVE_PTHREAD_NP_H)
@@ -43,6 +38,9 @@ SET(hsbench_SOURCES
     huge.cpp
     huge.h
     main.cpp
+    sqldb.cpp
+    sqldb.h
+    sqldb_bind.h
     thread_barrier.h
     timer.h
 )
